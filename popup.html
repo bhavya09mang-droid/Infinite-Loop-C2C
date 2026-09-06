@@ -1,13 +1,689 @@
 <!DOCTYPE html>
-<html>
+<html lang="en" class="dark">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dark Pattern Detector - Extension Popup</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="output.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
   <style>
-    body { width: 300px; padding: 15px; font-family: sans-serif; background-color: #0f172a; color: white; }
-    h3 { color: #00b4d8; margin-top: 0; }
+    ::-webkit-scrollbar {
+      width: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+
+    .glass-panel {
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    @keyframes pulse-scan {
+      0% { top: 0%; opacity: 0.8; }
+      50% { opacity: 0.4; }
+      100% { top: 100%; opacity: 0.8; }
+    }
+
+    .scan-line {
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, #6366f1, transparent);
+      animation: pulse-scan 1.5s infinite ease-in-out;
+    }
+
+    /* Radial score progress ring */
+    .circle-bg {
+      fill: none;
+      stroke: #334155;
+      stroke-width: 3.8;
+    }
+    .circle-progress {
+      fill: none;
+      stroke-width: 3.8;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.8s ease, stroke 0.5s ease;
+    }
   </style>
 </head>
-<body>
-  <h3>Guardian Active</h3>
-  <p>Scanning current page for dark patterns...</p>
+<body class="bg-slate-950 text-slate-100 font-sans w-[400px] h-[600px] overflow-hidden flex flex-col antialiased select-none border border-slate-800 shadow-2xl">
+
+  <!-- Extension Header -->
+  <header class="bg-slate-900/90 border-b border-slate-800 p-3.5 flex items-center justify-between sticky top-0 z-30">
+    <div class="flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-lg bg-indigo-600/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+        <i data-lucide="shield-alert" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <h1 class="text-sm font-bold text-slate-100 tracking-tight flex items-center gap-1.5">
+          ShadowGuard <span class="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded font-mono">v3.2</span>
+        </h1>
+        <p class="text-[11px] text-slate-400 truncate max-w-[170px]" id="current-domain">shop-deals-now.com</p>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="flex items-center gap-1.5">
+      <button id="rescan-btn" title="Re-scan Page" class="p-2 rounded-md hover:bg-slate-800 text-slate-300 hover:text-indigo-400 transition-colors">
+        <i data-lucide="rotate-cw" class="w-4 h-4" id="rescan-icon"></i>
+      </button>
+      <button id="settings-tab-btn" title="Settings" class="p-2 rounded-md hover:bg-slate-800 text-slate-300 hover:text-indigo-400 transition-colors">
+        <i data-lucide="sliders" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- Mock Environment Switcher Bar (For Demo / Testing) -->
+  <div class="bg-slate-900 border-b border-slate-800/80 px-3 py-1.5 flex items-center justify-between text-[11px] text-slate-400">
+    <span class="flex items-center gap-1 text-slate-400 font-medium"><i data-lucide="flask-conical" class="w-3 h-3 text-indigo-400"></i> Demo Target:</span>
+    <select id="preset-selector" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-0.5 text-[11px] focus:outline-none focus:border-indigo-500">
+      <option value="high">High Risk Retailer (84)</option>
+      <option value="medium">Medium Risk SaaS (42)</option>
+      <option value="clean">Verified Safe Shop (0)</option>
+    </select>
+  </div>
+
+  <!-- Scanning Overlay Animation (Hidden by default) -->
+  <div id="scanning-overlay" class="hidden absolute inset-0 bg-slate-950/90 z-40 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+    <div class="relative w-16 h-16 mb-4 flex items-center justify-center">
+      <div class="absolute inset-0 rounded-full border-2 border-indigo-500/20 animate-ping"></div>
+      <div class="w-12 h-12 rounded-full bg-indigo-600/20 border border-indigo-500 flex items-center justify-center text-indigo-400">
+        <i data-lucide="scan" class="w-6 h-6 animate-pulse"></i>
+      </div>
+      <div class="scan-line"></div>
+    </div>
+    <h3 class="text-sm font-semibold text-slate-200 mb-1">Analyzing DOM & Network Traffic</h3>
+    <p class="text-xs text-slate-400 mb-4">Evaluating NLP heuristics, price history, and timers...</p>
+    <div class="w-48 bg-slate-800 h-1.5 rounded-full overflow-hidden border border-slate-700">
+      <div id="scan-progress" class="bg-indigo-500 h-full w-0 transition-all duration-300"></div>
+    </div>
+  </div>
+
+  <!-- Main Scrollable Content Container -->
+  <div class="flex-1 overflow-y-auto relative" id="main-scroll-area">
+
+    <!-- Tab Navigation -->
+    <div class="flex border-b border-slate-800/80 bg-slate-900/50 sticky top-0 z-20 backdrop-blur-md">
+      <button id="tab-threats" class="flex-1 py-2.5 text-xs font-semibold text-indigo-400 border-b-2 border-indigo-500 flex items-center justify-center gap-1.5 transition-all">
+        <i data-lucide="shield-alert" class="w-3.5 h-3.5"></i> Detected (<span id="threat-count-badge">4</span>)
+      </button>
+      <button id="tab-breakdown" class="flex-1 py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-200 border-b-2 border-transparent flex items-center justify-center gap-1.5 transition-all">
+        <i data-lucide="pie-chart" class="w-3.5 h-3.5"></i> Page Metrics
+      </button>
+      <button id="tab-settings" class="flex-1 py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-200 border-b-2 border-transparent flex items-center justify-center gap-1.5 transition-all">
+        <i data-lucide="settings" class="w-3.5 h-3.5"></i> Controls
+      </button>
+    </div>
+
+    <!-- VIEW 1: DETECTED THREATS TAB -->
+    <div id="view-threats" class="p-3.5 space-y-3.5">
+      
+      <!-- Overall Risk Score Card -->
+      <div class="glass-panel rounded-xl p-3.5 flex items-center gap-4 relative overflow-hidden shadow-lg border border-slate-800">
+        <!-- Circular Progress Chart -->
+        <div class="relative w-20 h-20 flex-shrink-0 flex items-center justify-center">
+          <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            <path id="score-circle" class="circle-progress" stroke-dasharray="100, 100" stroke-dashoffset="16" stroke="#ef4444" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+          </svg>
+          <div class="absolute flex flex-col items-center justify-center">
+            <span id="score-number" class="text-xl font-black text-slate-100 tracking-tight">84</span>
+            <span class="text-[9px] uppercase tracking-wider text-slate-400 font-medium">Risk Score</span>
+          </div>
+        </div>
+
+        <!-- Risk Summary Info -->
+        <div class="flex-1 space-y-1">
+          <div class="flex items-center justify-between">
+            <span id="risk-level-badge" class="px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30 uppercase tracking-wide">
+              Critical Risk
+            </span>
+            <span class="text-[11px] text-slate-400 font-mono" id="scanned-time">Scanned just now</span>
+          </div>
+          <h2 id="risk-headline" class="text-xs font-semibold text-slate-200">High deceptive pattern concentration detected.</h2>
+          <p class="text-[11px] text-slate-400 leading-tight">This vendor uses aggressive psychological pressure and hidden price modifiers.</p>
+        </div>
+      </div>
+
+      <!-- Category Filter Pills -->
+      <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] no-scrollbar" id="filter-container">
+        <button data-filter="all" class="filter-btn px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-medium shadow-sm transition-all flex-shrink-0">
+          All (<span id="cnt-all">4</span>)
+        </button>
+        <button data-filter="urgency" class="filter-btn px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium transition-all flex-shrink-0 flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full bg-red-500"></span> Fake Urgency
+        </button>
+        <button data-filter="discount" class="filter-btn px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium transition-all flex-shrink-0 flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full bg-amber-500"></span> Discounts
+        </button>
+        <button data-filter="hiddenfee" class="filter-btn px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium transition-all flex-shrink-0 flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full bg-purple-500"></span> Hidden Fees
+        </button>
+      </div>
+
+      <!-- Threat Cards List -->
+      <div class="space-y-2.5" id="threats-list">
+        <!-- Dynamic content injected by JavaScript -->
+      </div>
+    </div>
+
+    <!-- VIEW 2: PAGE ANALYSIS METRICS (Hidden by default) -->
+    <div id="view-breakdown" class="hidden p-3.5 space-y-3.5">
+      <div class="glass-panel p-3.5 rounded-xl space-y-3">
+        <h3 class="text-xs font-bold text-slate-200 flex items-center gap-1.5 uppercase tracking-wider">
+          <i data-lucide="bar-chart-3" class="w-4 h-4 text-indigo-400"></i> Category Vulnerability Breakdown
+        </h3>
+        
+        <!-- Metrics List -->
+        <div class="space-y-2.5 text-xs">
+          <div>
+            <div class="flex justify-between text-slate-300 mb-1">
+              <span class="flex items-center gap-1.5"><i data-lucide="clock" class="w-3.5 h-3.5 text-red-400"></i> Scarcity & Fake Urgency</span>
+              <span class="font-mono text-red-400 font-bold">88% Risk</span>
+            </div>
+            <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+              <div class="bg-red-500 h-full rounded-full" style="width: 88%"></div>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex justify-between text-slate-300 mb-1">
+              <span class="flex items-center gap-1.5"><i data-lucide="tag" class="w-3.5 h-3.5 text-amber-400"></i> Misleading Pricing & Discounts</span>
+              <span class="font-mono text-amber-400 font-bold">75% Risk</span>
+            </div>
+            <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+              <div class="bg-amber-500 h-full rounded-full" style="width: 75%"></div>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex justify-between text-slate-300 mb-1">
+              <span class="flex items-center gap-1.5"><i data-lucide="shopping-bag" class="w-3.5 h-3.5 text-purple-400"></i> Hidden Drip Fees & Pre-checks</span>
+              <span class="font-mono text-purple-400 font-bold">60% Risk</span>
+            </div>
+            <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+              <div class="bg-purple-500 h-full rounded-full" style="width: 60%"></div>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex justify-between text-slate-300 mb-1">
+              <span class="flex items-center gap-1.5"><i data-lucide="mouse-pointer-click" class="w-3.5 h-3.5 text-pink-400"></i> Forced Action / Obstruction</span>
+              <span class="font-mono text-pink-400 font-bold">45% Risk</span>
+            </div>
+            <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+              <div class="bg-pink-500 h-full rounded-full" style="width: 45%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Historical Trust Box -->
+      <div class="bg-slate-900 border border-slate-800 p-3.5 rounded-xl space-y-2">
+        <h4 class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+          <i data-lucide="history" class="w-3.5 h-3.5 text-indigo-400"></i> Price History Insights
+        </h4>
+        <p class="text-[11px] text-slate-400 leading-relaxed">
+          Our NLP algorithms indexed this item 14 times over 90 days. The lowest price was <strong class="text-slate-200">$39.99</strong>, which matches today's "Special Sale" price. The MSRP of $129.99 was never recorded.
+        </p>
+      </div>
+    </div>
+
+    <!-- VIEW 3: SETTINGS TAB (Hidden by default) -->
+    <div id="view-settings" class="hidden p-3.5 space-y-3">
+      <div class="glass-panel p-3 rounded-xl divide-y divide-slate-800/80">
+        
+        <!-- Toggle 1 -->
+        <div class="py-2.5 flex items-center justify-between">
+          <div>
+            <div class="text-xs font-semibold text-slate-200">Real-time Auto-Scan</div>
+            <div class="text-[10px] text-slate-400">Scan DOM automatically on page navigation</div>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" checked class="sr-only peer">
+            <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+          </label>
+        </div>
+
+        <!-- Toggle 2 -->
+        <div class="py-2.5 flex items-center justify-between">
+          <div>
+            <div class="text-xs font-semibold text-slate-200">In-Page Visual Badges</div>
+            <div class="text-[10px] text-slate-400">Inject warning overlays directly over elements</div>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" checked class="sr-only peer">
+            <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+          </label>
+        </div>
+
+        <!-- Toggle 3 -->
+        <div class="py-2.5 flex items-center justify-between">
+          <div>
+            <div class="text-xs font-semibold text-slate-200">Audio Warnings</div>
+            <div class="text-[10px] text-slate-400">Chime when critical hidden fees are added</div>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" class="sr-only peer">
+            <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+          </label>
+        </div>
+      </div>
+
+      <!-- Domain Exclusion -->
+      <div class="glass-panel p-3 rounded-xl space-y-2">
+        <div class="text-xs font-semibold text-slate-200">Domain Whitelist</div>
+        <p class="text-[10px] text-slate-400">Disable threat flagging on trusted store domains.</p>
+        <button id="whitelist-btn" class="w-full py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 transition-colors flex items-center justify-center gap-1.5">
+          <i data-lucide="shield-off" class="w-3.5 h-3.5 text-slate-400"></i> Pause ShadowGuard on this site
+        </button>
+      </div>
+
+      <div class="text-center pt-2">
+        <span class="text-[10px] text-slate-500 font-mono">Manifest V3 Compliant • Heuristic Engine v2.4</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Extension Footer -->
+  <footer class="bg-slate-900 border-t border-slate-800 p-2.5 flex items-center justify-between text-xs">
+    <div class="flex items-center gap-2">
+      <span class="relative flex h-2 w-2">
+        <span id="pulse-dot" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+        <span id="status-dot" class="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+      </span>
+      <span id="footer-status" class="text-[11px] text-slate-300 font-medium">Protection Active</span>
+    </div>
+    <button id="report-page-btn" class="text-[11px] text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1 transition-colors">
+      <i data-lucide="flag" class="w-3 h-3"></i> Report Site
+    </button>
+  </footer>
+
+  <!-- Notification Toast Notification -->
+  <div id="toast" class="fixed bottom-12 left-1/2 transform -translate-x-1/2 bg-slate-800 border border-indigo-500/50 text-slate-200 text-xs px-3 py-2 rounded-lg shadow-xl opacity-0 pointer-events-none transition-all duration-300 flex items-center gap-2 z-50">
+    <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400"></i>
+    <span id="toast-message">Action executed</span>
+  </div>
+
+  <script>
+    const DATA_PRESETS = {
+      high: {
+        domain: 'shop-mega-deals.com',
+        score: 84,
+        headline: 'Critical risk: Multiple deceptive tricks present.',
+        time: 'Just now',
+        threats: [
+          {
+            id: 't1',
+            category: 'urgency',
+            categoryLabel: 'Fake Urgency',
+            color: '#ef4444',
+            bgTint: 'rgba(239, 68, 68, 0.1)',
+            borderColor: 'rgba(239, 68, 68, 0.3)',
+            badgeClass: 'bg-red-500/20 text-red-400 border-red-500/30',
+            icon: 'clock',
+            title: 'Synthetic Countdown Timer',
+            severity: 'HIGH (89%)',
+            detectedText: '"Offer expires in 04:12! Hurry, 12 people have this in cart."',
+            reasoning: 'NLP DOM analysis detected local storage loop. Timer resets to 15:00 automatically upon page refresh or cookie clear.',
+            action: 'Ignore timer pressure. The price will remain identical after countdown finishes.',
+            highlighted: false
+          },
+          {
+            id: 't2',
+            category: 'discount',
+            categoryLabel: 'Misleading Discount',
+            color: '#f59e0b',
+            bgTint: 'rgba(245, 158, 11, 0.1)',
+            borderColor: 'rgba(245, 158, 11, 0.3)',
+            badgeClass: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+            icon: 'tag',
+            title: 'Inflated Strikethrough Price',
+            severity: 'HIGH (82%)',
+            detectedText: 'Was $199.99 | Now $49.99 (75% OFF)',
+            reasoning: 'Historical price tracking API indicates item baseline price has been $49.99 for the past 90 consecutive days.',
+            action: 'Do not treat $49.99 as a limited-time sale. This is the standard retail price.',
+            highlighted: false
+          },
+          {
+            id: 't3',
+            category: 'hiddenfee',
+            categoryLabel: 'Hidden Drip Fee',
+            color: '#8b5cf6',
+            bgTint: 'rgba(139, 92, 246, 0.1)',
+            borderColor: 'rgba(139, 92, 246, 0.3)',
+            badgeClass: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+            icon: 'shopping-bag',
+            title: 'Pre-selected Mandatory Protection',
+            severity: 'MED (68%)',
+            detectedText: '+$4.99 "Shipping Guarantee & Express Care" added at checkout',
+            reasoning: 'Hidden checkbox auto-selected prior to cart preview without explicit user consent.',
+            action: 'Manually uncheck the "Shipping Insurance" checkbox in your order breakdown before payment.',
+            highlighted: false
+          },
+          {
+            id: 't4',
+            category: 'forced',
+            categoryLabel: 'Forced Action',
+            color: '#ec4899',
+            bgTint: 'rgba(236, 72, 153, 0.1)',
+            borderColor: 'rgba(236, 72, 153, 0.3)',
+            badgeClass: 'bg-pink-500/20 text-pink-400 border-pink-500/30',
+            icon: 'mouse-pointer-click',
+            title: 'Confirmshaming Opt-Out',
+            severity: 'LOW (45%)',
+            detectedText: '"No thanks, I prefer paying full price and staying unsafe"',
+            reasoning: 'Manipulative emotive phrasing used on declining popup subscription modal.',
+            action: 'Click the small close icon (X) top right instead of engaging with emotional buttons.',
+            highlighted: false
+          }
+        ]
+      },
+      medium: {
+        domain: 'app-cloud-service.io',
+        score: 42,
+        headline: 'Moderate Risk: Check subscriptions & renewals.',
+        time: '2 mins ago',
+        threats: [
+          {
+            id: 'tm1',
+            category: 'hiddenfee',
+            categoryLabel: 'Hidden Renewal',
+            color: '#8b5cf6',
+            bgTint: 'rgba(139, 92, 246, 0.1)',
+            borderColor: 'rgba(139, 92, 246, 0.3)',
+            badgeClass: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+            icon: 'refresh-cw',
+            title: 'Auto-Recurring Annual Billing',
+            severity: 'MED (62%)',
+            detectedText: 'billed at $120/yr after 7-day trial ends',
+            reasoning: 'Small font size (8px) grayed text hides auto-renewal authorization terms.',
+            action: 'Set a calendar reminder to cancel 2 days prior to trial completion.',
+            highlighted: false
+          },
+          {
+            id: 'tm2',
+            category: 'discount',
+            categoryLabel: 'Bait & Switch',
+            color: '#f59e0b',
+            bgTint: 'rgba(245, 158, 11, 0.1)',
+            borderColor: 'rgba(245, 158, 11, 0.3)',
+            badgeClass: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+            icon: 'dollar-sign',
+            title: 'Per-User Hidden Scaling',
+            severity: 'LOW (40%)',
+            detectedText: 'Starting at $5/mo*',
+            reasoning: 'Asterisk requires minimum 10 seat purchase hidden in footer FAQ.',
+            action: 'Calculate real total cost ($50/mo minimum) before initiating signup.',
+            highlighted: false
+          }
+        ]
+      },
+      clean: {
+        domain: 'verified-ethical-shop.org',
+        score: 0,
+        headline: 'No deceptive patterns detected on this page.',
+        time: 'Scanned just now',
+        threats: []
+      }
+    };
+
+    let currentData = DATA_PRESETS.high;
+    let activeFilter = 'all';
+
+    const threatsContainer = document.getElementById('threats-list');
+    const scoreNumber = document.getElementById('score-number');
+    const scoreCircle = document.getElementById('score-circle');
+    const riskLevelBadge = document.getElementById('risk-level-badge');
+    const riskHeadline = document.getElementById('risk-headline');
+    const currentDomainEl = document.getElementById('current-domain');
+    const threatCountBadge = document.getElementById('threat-count-badge');
+    const presetSelector = document.getElementById('preset-selector');
+    const scanningOverlay = document.getElementById('scanning-overlay');
+    const scanProgress = document.getElementById('scan-progress');
+    const rescanBtn = document.getElementById('rescan-btn');
+    const toast = document.getElementById('toast');
+    const toastMessage = document.getElementById('toast-message');
+
+    const tabThreats = document.getElementById('tab-threats');
+    const tabBreakdown = document.getElementById('tab-breakdown');
+    const tabSettings = document.getElementById('tab-settings');
+    const viewThreats = document.getElementById('view-threats');
+    const viewBreakdown = document.getElementById('view-breakdown');
+    const viewSettings = document.getElementById('view-settings');
+
+    function showToast(msg) {
+      toastMessage.textContent = msg;
+      toast.classList.remove('opacity-0', 'pointer-events-none');
+      toast.classList.add('opacity-100');
+      setTimeout(() => {
+        toast.classList.remove('opacity-100');
+        toast.classList.add('opacity-0', 'pointer-events-none');
+      }, 2200);
+    }
+
+    function renderDashboardScore(score) {
+      scoreNumber.textContent = score;
+      const offset = 100 - score;
+      scoreCircle.style.strokeDashoffset = offset;
+
+      if (score >= 70) {
+        scoreCircle.setAttribute('stroke', '#ef4444');
+        riskLevelBadge.className = "px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30 uppercase tracking-wide";
+        riskLevelBadge.textContent = "Critical Risk";
+        document.getElementById('status-dot').className = "relative inline-flex rounded-full h-2 w-2 bg-red-500";
+        document.getElementById('pulse-dot').className = "animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75";
+      } else if (score >= 30) {
+        scoreCircle.setAttribute('stroke', '#f59e0b');
+        riskLevelBadge.className = "px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 uppercase tracking-wide";
+        riskLevelBadge.textContent = "Moderate Risk";
+        document.getElementById('status-dot').className = "relative inline-flex rounded-full h-2 w-2 bg-amber-500";
+        document.getElementById('pulse-dot').className = "animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75";
+      } else {
+        scoreCircle.setAttribute('stroke', '#10b981');
+        riskLevelBadge.className = "px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase tracking-wide";
+        riskLevelBadge.textContent = "Verified Safe";
+        document.getElementById('status-dot').className = "relative inline-flex rounded-full h-2 w-2 bg-emerald-500";
+        document.getElementById('pulse-dot').className = "hidden";
+      }
+    }
+
+    function renderThreats() {
+      threatsContainer.innerHTML = '';
+      const filtered = activeFilter === 'all' 
+        ? currentData.threats 
+        : currentData.threats.filter(t => t.category === activeFilter);
+
+      threatCountBadge.textContent = currentData.threats.length;
+      document.getElementById('cnt-all').textContent = currentData.threats.length;
+
+      if (filtered.length === 0) {
+        threatsContainer.innerHTML = `
+          <div class="glass-panel p-6 rounded-xl text-center space-y-2 my-4">
+            <div class="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center mx-auto">
+              <i data-lucide="shield-check" class="w-6 h-6"></i>
+            </div>
+            <h4 class="text-xs font-bold text-slate-200">No Deceptive Threats Found</h4>
+            <p class="text-[11px] text-slate-400">This store section passed all heuristic, pricing, and countdown timer checks.</p>
+          </div>
+        `;
+        lucide.createIcons();
+        return;
+      }
+
+      filtered.forEach(threat => {
+        const card = document.createElement('div');
+        card.className = "glass-panel rounded-xl border p-3 space-y-2.5 transition-all duration-200 hover:border-slate-700";
+        card.style.borderColor = threat.borderColor;
+
+        card.innerHTML = `
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <div class="w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold" style="background:${threat.bgTint}; color:${threat.color};">
+                <i data-lucide="${threat.icon}" class="w-3.5 h-3.5"></i>
+              </div>
+              <div>
+                <h3 class="text-xs font-bold text-slate-100 flex items-center gap-1.5">
+                  ${threat.title}
+                </h3>
+                <span class="text-[10px] px-1.5 py-0.2 rounded border ${threat.badgeClass} font-mono font-medium">
+                  ${threat.categoryLabel} • ${threat.severity}
+                </span>
+              </div>
+            </div>
+
+            <button class="highlight-btn text-[10px] px-2 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 flex items-center gap-1 transition-colors" data-id="${threat.id}">
+              <i data-lucide="${threat.highlighted ? 'eye-off' : 'eye'}" class="w-3 h-3 text-indigo-400"></i>
+              <span>${threat.highlighted ? 'Unhighlight' : 'Highlight'}</span>
+            </button>
+          </div>
+
+          <div class="bg-slate-950/80 rounded border border-slate-800/80 p-2 font-mono text-[10px] text-slate-300 italic flex items-start gap-1.5">
+            <i data-lucide="quote" class="w-3 h-3 text-slate-500 flex-shrink-0 mt-0.5"></i>
+            <span>${threat.detectedText}</span>
+          </div>
+
+          <div class="space-y-1 text-[11px]">
+            <div class="text-slate-300 font-semibold flex items-center gap-1">
+              <i data-lucide="cpu" class="w-3 h-3 text-indigo-400"></i> Why flagged (NLP / Heuristics):
+            </div>
+            <p class="text-slate-400 leading-tight pl-4">
+              ${threat.reasoning}
+            </p>
+          </div>
+
+          <div class="bg-indigo-950/30 border border-indigo-500/20 rounded-lg p-2 text-[11px] space-y-0.5">
+            <div class="text-indigo-300 font-semibold flex items-center gap-1">
+              <i data-lucide="lightbulb" class="w-3 h-3 text-amber-400"></i> Recommended Action:
+            </div>
+            <p class="text-slate-300 leading-tight">
+              ${threat.action}
+            </p>
+          </div>
+
+          <div class="flex justify-end pt-0.5">
+            <button class="report-fp-btn text-[10px] text-slate-500 hover:text-slate-400 flex items-center gap-1" data-id="${threat.id}">
+              <i data-lucide="flag" class="w-2.5 h-2.5"></i> Report false detection
+            </button>
+          </div>
+        `;
+
+        threatsContainer.appendChild(card);
+      });
+
+      lucide.createIcons();
+
+      document.querySelectorAll('.highlight-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const tid = btn.getAttribute('data-id');
+          const t = currentData.threats.find(item => item.id === tid);
+          if (t) {
+            t.highlighted = !t.highlighted;
+            showToast(t.highlighted ? `Highlighted "${t.title}" on page DOM` : `Removed highlight`);
+            renderThreats();
+          }
+        });
+      });
+
+      document.querySelectorAll('.report-fp-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          showToast("Report submitted to model training queue");
+        });
+      });
+    }
+
+    function loadPreset(key) {
+      currentData = DATA_PRESETS[key];
+      currentDomainEl.textContent = currentData.domain;
+      riskHeadline.textContent = currentData.headline;
+      document.getElementById('scanned-time').textContent = currentData.time;
+      renderDashboardScore(currentData.score);
+      renderThreats();
+    }
+
+    function triggerScanAnimation() {
+      scanningOverlay.classList.remove('hidden');
+      scanProgress.style.width = '0%';
+      rescanBtn.classList.add('rotate-180');
+
+      let step = 0;
+      const interval = setInterval(() => {
+        step += 25;
+        scanProgress.style.width = step + '%';
+
+        if (step >= 100) {
+          clearInterval(interval);
+          setTimeout(() => {
+            scanningOverlay.classList.add('hidden');
+            rescanBtn.classList.remove('rotate-180');
+            showToast("Scan completed: DOM & Network validated");
+          }, 300);
+        }
+      }, 200);
+    }
+
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-btn').forEach(b => {
+          b.className = "filter-btn px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700 font-medium transition-all flex-shrink-0 flex items-center gap-1";
+        });
+        btn.className = "filter-btn px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-medium shadow-sm transition-all flex-shrink-0 flex items-center gap-1";
+        activeFilter = btn.getAttribute('data-filter');
+        renderThreats();
+      });
+    });
+
+    presetSelector.addEventListener('change', (e) => {
+      triggerScanAnimation();
+      loadPreset(e.target.value);
+    });
+
+    rescanBtn.addEventListener('click', () => {
+      triggerScanAnimation();
+    });
+
+    function switchTab(activeTab, activeView) {
+      [tabThreats, tabBreakdown, tabSettings].forEach(t => {
+        t.className = "flex-1 py-2.5 text-xs font-semibold text-slate-400 hover:text-slate-200 border-b-2 border-transparent flex items-center justify-center gap-1.5 transition-all";
+      });
+      [viewThreats, viewBreakdown, viewSettings].forEach(v => v.classList.add('hidden'));
+
+      activeTab.className = "flex-1 py-2.5 text-xs font-semibold text-indigo-400 border-b-2 border-indigo-500 flex items-center justify-center gap-1.5 transition-all";
+      activeView.classList.remove('hidden');
+    }
+
+    tabThreats.addEventListener('click', () => switchTab(tabThreats, viewThreats));
+    tabBreakdown.addEventListener('click', () => switchTab(tabBreakdown, viewBreakdown));
+    tabSettings.addEventListener('click', () => switchTab(tabSettings, viewSettings));
+    document.getElementById('settings-tab-btn').addEventListener('click', () => switchTab(tabSettings, viewSettings));
+
+    document.getElementById('whitelist-btn').addEventListener('click', () => {
+      showToast(`Domain ${currentData.domain} added to whitelist`);
+    });
+
+    document.getElementById('report-page-btn').addEventListener('click', () => {
+      showToast("Page reported for manual auditor review");
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      loadPreset('high');
+    });
+  </script>
 </body>
 </html>

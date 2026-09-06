@@ -1,4 +1,4 @@
-// Client Bridge: Zero-latency DOM extraction
+// Client Bridge: zero-latency DOM extraction
 const pageText = document.body ? document.body.innerText : "";
 
 if (pageText.trim().length > 0) {
