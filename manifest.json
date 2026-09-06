@@ -1,27 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Dark Pattern Guardian",
-  "version": "1.0.0",
-  "description": "Zero-latency real-time dark pattern and deceptive UX scanner.",
-  "permissions": [
-    "activeTab",
-    "scripting"
-  ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
-  "background": {
-    "service_worker": "background.js"
-  },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content_bridge.js"],
-      "run_at": "document_idle"
-    }
-  ],
+  "name": "Dark Pattern Scanner",
+  "version": "1.0",
+  "description": "Detects deceptive UI patterns on e-commerce pages.",
   "action": {
-    "default_title": "Dark Pattern Guardian",
     "default_popup": "popup.html"
   }
 }
